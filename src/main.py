@@ -77,7 +77,7 @@ def compute_team_strength(team_df):
     diversity = normalize(pd.Series([diversity]))[0]
 
     team_strength = (
-        avg_individual * 0.75 +  # stabiler Fix-Anteil (optional wissenschaftlich begründbar)
+        avg_individual * 0.75 +
         lp_balance * TEAM_WEIGHTS["lp_balance"] +
         diversity * TEAM_WEIGHTS["teammate_diversity"]
     )
@@ -86,23 +86,48 @@ def compute_team_strength(team_df):
 
 
 # -----------------------------
-# 5. TEAM BUILDING
+# 5. BALANCED TEAM BUILDER (FIXED)
 # -----------------------------
 
 def build_teams(df, team_size=5):
-    df = df.sample(frac=1).reset_index(drop=True)
 
+    # 1. Strength berechnen
+    df = compute_individual_strength(df)
+
+    # 2. nach Stärke sortieren (WICHTIG)
+    df = df.sort_values("individual_strength", ascending=False).reset_index(drop=True)
+
+    num_teams = len(df) // team_size
+    teams = [[] for _ in range(num_teams)]
+
+    # 3. Snake / Round-Robin Verteilung
+    direction = 1
+    idx = 0
+
+    for _, row in df.iterrows():
+        teams[idx].append(row)
+
+        idx += direction
+
+        if idx == num_teams:
+            idx = num_teams - 1
+            direction = -1
+        elif idx < 0:
+            idx = 0
+            direction = 1
+
+    # 4. Ergebnisse berechnen
     results = []
 
-    for i in range(0, len(df), team_size):
-        team = df.iloc[i:i+team_size]
+    for team in teams:
+        team_df = pd.DataFrame(team)
 
-        if len(team) < team_size:
+        if len(team_df) < team_size:
             continue
 
         results.append({
-            "team_strength": compute_team_strength(team),
-            "avg_individual_strength": team["individual_strength"].mean()
+            "team_strength": compute_team_strength(team_df),
+            "avg_individual_strength": team_df["individual_strength"].mean()
         })
 
     return pd.DataFrame(results)
