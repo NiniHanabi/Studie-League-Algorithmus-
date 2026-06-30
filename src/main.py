@@ -76,31 +76,27 @@ def compute_team_strength(team_df):
     diversity = team_df["unique_teammates"].mean()
     diversity = normalize(pd.Series([diversity]))[0]
 
-    team_strength = (
+    return (
         avg_individual * 0.75 +
         lp_balance * TEAM_WEIGHTS["lp_balance"] +
         diversity * TEAM_WEIGHTS["teammate_diversity"]
     )
 
-    return team_strength
-
 
 # -----------------------------
-# 5. BALANCED TEAM BUILDER (FIXED)
+# 5. BALANCED TEAMS (FAIR DISTRIBUTION)
 # -----------------------------
 
 def build_teams(df, team_size=5):
 
-    # 1. Strength berechnen
     df = compute_individual_strength(df)
 
-    # 2. nach Stärke sortieren (WICHTIG)
+    # nach Stärke sortieren
     df = df.sort_values("individual_strength", ascending=False).reset_index(drop=True)
 
     num_teams = len(df) // team_size
     teams = [[] for _ in range(num_teams)]
 
-    # 3. Snake / Round-Robin Verteilung
     direction = 1
     idx = 0
 
@@ -116,7 +112,6 @@ def build_teams(df, team_size=5):
             idx = 0
             direction = 1
 
-    # 4. Ergebnisse berechnen
     results = []
 
     for team in teams:
@@ -131,3 +126,50 @@ def build_teams(df, team_size=5):
         })
 
     return pd.DataFrame(results)
+
+
+# -----------------------------
+# 6. STRONGEST TEAMS (GREEDY STACKING)
+# -----------------------------
+
+def build_strongest_teams(df, team_size=5):
+
+    df = compute_individual_strength(df)
+
+    df = df.sort_values("individual_strength", ascending=False).reset_index(drop=True)
+
+    num_teams = len(df) // team_size
+    teams = [[] for _ in range(num_teams)]
+
+    for i in range(len(df)):
+        team_idx = i // team_size
+        if team_idx >= num_teams:
+            break
+        teams[team_idx].append(df.iloc[i])
+
+    results = []
+
+    for team in teams:
+        team_df = pd.DataFrame(team)
+
+        if len(team_df) < team_size:
+            continue
+
+        results.append({
+            "team_strength": compute_team_strength(team_df),
+            "avg_individual_strength": team_df["individual_strength"].mean()
+        })
+
+    return pd.DataFrame(results)
+
+
+# -----------------------------
+# 7. OPTIONAL: BEIDES ZUSAMMEN
+# -----------------------------
+
+def build_both_team_types(df, team_size=5):
+
+    return {
+        "balanced_teams": build_teams(df, team_size),
+        "strongest_teams": build_strongest_teams(df, team_size)
+    }
