@@ -1,9 +1,7 @@
 import numpy as np
 import pandas as pd
 
-# -----------------------------
-# 1. GEWICHTE AUS LITERATUR
-# -----------------------------
+# Gewichtung der Faktoren festlegen
 
 INDIVIDUAL_RAW_WEIGHTS = {
     "rank": 3,
@@ -18,29 +16,23 @@ TEAM_RAW_WEIGHTS = {
     "teammate_diversity": 8
 }
 
+# Normalisierung der Gewichte
 
 def normalize_weights(raw_dict):
     total = sum(raw_dict.values())
     return {k: v / total for k, v in raw_dict.items()}
 
-
 INDIVIDUAL_WEIGHTS = normalize_weights(INDIVIDUAL_RAW_WEIGHTS)
 TEAM_WEIGHTS = normalize_weights(TEAM_RAW_WEIGHTS)
 
-
-# -----------------------------
-# 2. NORMALISIERUNG
-# -----------------------------
+# Normalisierung der Faktoren
 
 def normalize(series):
     if series.max() == series.min():
         return series * 0
     return (series - series.min()) / (series.max() - series.min())
 
-
-# -----------------------------
-# 3. INDIVIDUAL SCORE
-# -----------------------------
+# Berechnung der Spielerstärke
 
 def compute_individual_strength(df):
     df = df.copy()
@@ -61,10 +53,7 @@ def compute_individual_strength(df):
 
     return df
 
-
-# -----------------------------
-# 4. TEAM SCORE
-# -----------------------------
+# 4. Berechnung der Team Stärke
 
 def compute_team_strength(team_df):
 
@@ -82,79 +71,94 @@ def compute_team_strength(team_df):
         diversity * TEAM_WEIGHTS["teammate_diversity"]
     )
 
-
-# -----------------------------
-# 5. BALANCED TEAMS (FAIR DISTRIBUTION)
-# -----------------------------
+# Gleichstarke Teams bilden
 
 def build_teams(df, team_size=5):
 
+    # Jeder Spieler erhält einen individuellen Score
     df = compute_individual_strength(df)
 
-    # nach Stärke sortieren
+    # Spieler nach Stärke sortieren
     df = df.sort_values("individual_strength", ascending=False).reset_index(drop=True)
 
+    # Berechnung der Team Anzahl
     num_teams = len(df) // team_size
+
+    # Erstellung leerer Teams
     teams = [[] for _ in range(num_teams)]
 
+    # Vorbereitung der Verteilung
     direction = 1
     idx = 0
 
+    # Spieler werden den Teams zugeordnet
     for _, row in df.iterrows():
         teams[idx].append(row)
 
         idx += direction
-
+    
+    # Richtungswechsel
         if idx == num_teams:
             idx = num_teams - 1
             direction = -1
+    
+    # Richtungswechsel
         elif idx < 0:
             idx = 0
             direction = 1
 
     results = []
 
+    # Vollständigkeit der Teams prüfen
     for team in teams:
         team_df = pd.DataFrame(team)
 
         if len(team_df) < team_size:
             continue
-
+    
+    # Stärke der Teams aufzeigen
         results.append({
             "team_strength": compute_team_strength(team_df),
             "avg_individual_strength": team_df["individual_strength"].mean()
         })
-
+        
     return pd.DataFrame(results)
 
-
-# -----------------------------
-# 6. STRONGEST TEAMS (GREEDY STACKING)
-# -----------------------------
+# Möglichst starke Teams bilden
 
 def build_strongest_teams(df, team_size=5):
 
+    # Jeder Spieler erhält einen individuellen Score
     df = compute_individual_strength(df)
 
+    # Spieler nach Stärke sortieren
     df = df.sort_values("individual_strength", ascending=False).reset_index(drop=True)
 
+    # Berechnung der Team Anzahl
     num_teams = len(df) // team_size
+
+    # Erstellung leerer Teams
     teams = [[] for _ in range(num_teams)]
 
+    # Spieler werden blockweise hintereinander in Teams zugeordnet
     for i in range(len(df)):
         team_idx = i // team_size
+    
+    # Schleife beenden sobald alle Teams gefüllt sind
         if team_idx >= num_teams:
             break
         teams[team_idx].append(df.iloc[i])
 
     results = []
 
+    # Vollständigkeit der Teams prüfen
     for team in teams:
         team_df = pd.DataFrame(team)
 
         if len(team_df) < team_size:
             continue
 
+     # Stärke der Teams aufzeigen
         results.append({
             "team_strength": compute_team_strength(team_df),
             "avg_individual_strength": team_df["individual_strength"].mean()
