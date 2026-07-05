@@ -1,0 +1,44 @@
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Editor settings
+.vscode/
+.idea/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python packaging
+build/
+dist/
+*.egg-info/
+
+# Environment files
+.env
+.env.*
+
+# Logs
+*.log
+
+# Riot-Crawler generated data
+Riot-Crawler/data/account_cache.json
+Riot-Crawler/data/ranks_cache.json
+Riot-Crawler/data/matches_raw/
+Riot-Crawler/data/processed/
+
+# Local notebooks and checkpoints
+.ipynb_checkpoints/
