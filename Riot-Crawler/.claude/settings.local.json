@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m analysis.build_dataset)",
+      "Bash(python -c ' *)"
+    ]
+  }
+}
