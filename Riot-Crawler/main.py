@@ -2,89 +2,60 @@
 Einstiegspunkt für den Riot-Crawler.
 
 Ablauf:
-  1. Seed-PUUIDs aus Challenger/GM/Master-Ladder holen
-  2. Pro PUUID: Match-IDs fetchen
-  3. Pro Match: Details fetchen
-  4. Ladder-Daten als Fallback für Rank-Lookups
+  1. Pro Division (Iron-Challenger, I-IV) die angegebene Anzahl Spieler ziehen,
+     inkl. exakter Elo (Tier/Rank/LP/Wins/Losses) aus derselben Response
+  2. Pro Spieler: die angegebene Anzahl Matches fetchen
+  3. Pro Match: für alle 10 Teilnehmer die Elo ins Match-JSON einbetten
+     (bekannte Spieler aus dem Rank-Cache, unbekannte per Einzel-Request)
 """
 import argparse
 from crawler.client import RiotClient
-from crawler.seed import get_seed_puuids
-from crawler.match_fetcher import get_match_ids, get_match_detail
-from crawler.rank_fetcher import (
-    load_cache,
-    save_cache,
-    fetch_all_ladder_data,
-    get_rank_from_ladder,
-    fetch_rank_by_puuid,
-)
+from crawler.seed import get_seed_players
+from crawler.match_fetcher import get_match_ids, fetch_match_detail, save_match, clear_raw_dir
+from crawler.rank_fetcher import save_cache, fetch_rank_by_puuid
 
 
 def crawl(matches_per_player: int = 10, players_per_division: int = 100, save_interval: int = 10):
     client = RiotClient()
-    rank_cache = load_cache()
-    seen_matches: set[str] = set()
+    clear_raw_dir()
 
     print("=== Seed-Phase ===")
-    puuids = get_seed_puuids(client, count_per_tier=players_per_division)
-    print(f"Total Seed-PUUIDs: {len(puuids)}\n")
+    seed_players = get_seed_players(client, count_per_tier=players_per_division)
+    print(f"Total Seed-Spieler: {len(seed_players)}\n")
 
-    print("=== Fetching Ladder Data (for rank lookups) ===")
-    ladder_data = fetch_all_ladder_data(client)
-    print()
+    rank_cache = {p["puuid"]: {k: v for k, v in p.items() if k != "puuid"} for p in seed_players}
 
     print("=== Crawl-Phase ===")
-    for i, puuid in enumerate(puuids, 1):
-        print(f"[{i}/{len(puuids)}] Fetching match IDs...")
+    seen_matches: set[str] = set()
+    for i, player in enumerate(seed_players, 1):
+        puuid = player["puuid"]
+        print(f"[{i}/{len(seed_players)}] Fetching match IDs...")
         match_ids = get_match_ids(client, puuid, count=matches_per_player)
         new_ids = [m for m in match_ids if m not in seen_matches]
         print(f"  {len(new_ids)} neue Matches (von {len(match_ids)})")
 
         for match_id in new_ids:
             seen_matches.add(match_id)
-            match = get_match_detail(client, match_id)
+            match = fetch_match_detail(client, match_id)
             if not match:
                 continue
 
             for participant in match["info"]["participants"]:
-                puuid_p = participant["puuid"]
-                # Lookup from ladder cache — nur speichern wenn Daten vorhanden
-                rank_data = get_rank_from_ladder(puuid_p, ladder_data)
-                if rank_data:
-                    rank_cache[puuid_p] = rank_data
+                p_puuid = participant["puuid"]
+                if p_puuid not in rank_cache:
+                    rank_cache[p_puuid] = fetch_rank_by_puuid(client, p_puuid)
+                participant["rankData"] = rank_cache[p_puuid]
+
+            save_match(match_id, match)
 
         if i % save_interval == 0:
             save_cache(rank_cache)
-            print(f"  Cache gespeichert ({len(rank_cache)} players, {len(seen_matches)} Matches)")
-
-    save_cache(rank_cache)
-
-    # === Rank-Enrichment: individuelle Lookups für Spieler ohne Ladder-Daten ===
-    # Scannt ALLE gecachten Matches (nicht nur die aus diesem Run)
-    from pathlib import Path
-    import json
-    all_puuids_in_matches = set()
-    for path in Path("data/matches_raw").glob("*.json"):
-        data = json.loads(path.read_text(encoding="utf-8"))
-        for p in data["info"]["participants"]:
-            all_puuids_in_matches.add(p["puuid"])
-
-    missing = [p for p in all_puuids_in_matches if p not in rank_cache]
-    print(f"\n=== Rank-Enrichment ===")
-    print(f"Spieler ohne Rank-Daten: {len(missing)} von {len(all_puuids_in_matches)}")
-
-    for i, puuid in enumerate(missing, 1):
-        rank_data = fetch_rank_by_puuid(client, puuid)
-        if rank_data:
-            rank_cache[puuid] = rank_data
-        if i % save_interval == 0:
-            save_cache(rank_cache)
-            print(f"  Enrichment: {i}/{len(missing)} ({sum(1 for v in rank_cache.values() if v)} total mit Rank)")
+            print(f"  Fortschritt: {len(seen_matches)} Matches gespeichert")
 
     save_cache(rank_cache)
     print(f"\n=== Done ===")
     print(f"Matches: {len(seen_matches)}")
-    print(f"Players with rank data: {sum(1 for v in rank_cache.values() if v)}/{len(rank_cache)}")
+    print(f"Spieler mit Rank-Daten: {sum(1 for v in rank_cache.values() if v)}/{len(rank_cache)}")
 
 
 if __name__ == "__main__":

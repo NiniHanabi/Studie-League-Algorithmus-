@@ -9,7 +9,6 @@ from crawler.account_fetcher import load_account_cache, save_account_cache, fetc
 from crawler.client import RiotClient
 
 RAW_DIR = Path("data/matches_raw")
-CACHE_FILE = Path("data/ranks_cache.json")
 OUT_DIR = Path("data/processed")
 
 VALID_ROLES = {"TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"}
@@ -17,7 +16,6 @@ RANKED_SOLO_QUEUE_ID = 420  # Ranked Solo/Duo
 
 
 def build_dataset() -> pd.DataFrame:
-    ranks = json.loads(CACHE_FILE.read_text(encoding="utf-8")) if CACHE_FILE.exists() else {}
     account_cache = load_account_cache()
     rows = []
 
@@ -40,7 +38,7 @@ def build_dataset() -> pd.DataFrame:
         game_duration = data["info"].get("gameDuration", None)
 
         for p in participants:
-            rank_data = ranks.get(p["puuid"])
+            rank_data = p.get("rankData")
 
             if rank_data:
                 tier = rank_data["tier"]
@@ -107,9 +105,14 @@ def build_dataset() -> pd.DataFrame:
 
     df["unique_teammates"] = df["puuid"].map(lambda p: len(teammate_counts.get(p, set())))
 
+    # win_rate auf 4 Nachkommastellen runden (16-stellige Float-Artefakte sind nicht sinnvoll lesbar)
+    df["win_rate"] = df["win_rate"].round(4)
+
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     df.to_parquet(OUT_DIR / "matches.parquet", index=False)
-    df.to_csv(OUT_DIR / "matches.csv", index=False)
+    # sep=";" und decimal="," entsprechen dem deutschen Excel-Zahlenformat,
+    # damit Punkt-Dezimalzahlen beim Öffnen nicht als Tausender-Trennzeichen fehlinterpretiert werden
+    df.to_csv(OUT_DIR / "matches.csv", index=False, sep=";", decimal=",")
 
     print(f"Dataset: {len(df)} Zeilen, {df['match_id'].nunique()} Matches")
     print(f"Neue Spalten: wins, losses, total_matches, win_rate, match_duration_s, main_role, role_consistency, unique_teammates")
@@ -132,7 +135,7 @@ def build_dataset() -> pd.DataFrame:
                 df.loc[i, "game_name"] = account_info["gameName"]
                 df.loc[i, "tag_line"] = account_info["tagLine"]
 
-        df.to_csv(OUT_DIR / "matches.csv", index=False)
+        df.to_csv(OUT_DIR / "matches.csv", index=False, sep=";", decimal=",")
         print("Done!")
 
     return df
