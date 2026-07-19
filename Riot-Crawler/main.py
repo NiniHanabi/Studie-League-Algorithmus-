@@ -11,13 +11,12 @@ Ablauf:
 import argparse
 from crawler.client import RiotClient
 from crawler.seed import get_seed_players
-from crawler.match_fetcher import get_match_ids, fetch_match_detail, save_match, clear_raw_dir
+from crawler.match_fetcher import get_match_ids, fetch_match_detail, save_match
 from crawler.rank_fetcher import save_cache, fetch_rank_by_puuid
 
 
 def crawl(matches_per_player: int = 10, players_per_division: int = 100, save_interval: int = 10):
     client = RiotClient()
-    clear_raw_dir()
 
     print("=== Seed-Phase ===")
     seed_players = get_seed_players(client, count_per_tier=players_per_division)
