@@ -37,6 +37,9 @@ dist/
 # Riot-Crawler generated data
 Riot-Crawler/data/account_cache.json
 Riot-Crawler/data/ranks_cache.json
+Riot-Crawler/data/summoner_cache.json
+Riot-Crawler/data/mastery_cache.json
+Riot-Crawler/data/flex_cache.json
 Riot-Crawler/data/matches_raw/
 Riot-Crawler/data/processed/
 
