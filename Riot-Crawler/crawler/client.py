@@ -1,13 +1,13 @@
 import time
 import requests
 from collections import deque
-from config import API_KEY, RATE_LIMIT_PER_SECOND, RATE_LIMIT_PER_2MIN
+from config import API_KEY, API_KEYS, RATE_LIMIT_PER_SECOND, RATE_LIMIT_PER_2MIN
 
 
 class RiotClient:
-    def __init__(self):
+    def __init__(self, api_key: str | None = None):
         self.session = requests.Session()
-        self.session.headers.update({"X-Riot-Token": API_KEY})
+        self.session.headers.update({"X-Riot-Token": api_key or API_KEY})
         self._timestamps: deque[float] = deque()
 
     def _enforce_rate_limits(self):
@@ -41,8 +41,27 @@ class RiotClient:
             time.sleep(retry_after)
             return self.get(url, params)
 
-        if resp.status_code in (403, 404):
+        if resp.status_code in (400, 403, 404):
+            if resp.status_code == 400:
+                print(f"  [400] Bad Request, skipping: {url}")
             return None
 
         resp.raise_for_status()
         return resp.json()
+
+
+class RiotClientPool:
+    """
+    Verteilt Requests round-robin über mehrere RiotClient-Instanzen (je ein API-Key).
+    Jede Instanz hat ihr eigenes, unabhängiges Rate-Limit-Fenster.
+    """
+
+    def __init__(self, api_keys: list[str] | None = None):
+        keys = api_keys or API_KEYS
+        self._clients = [RiotClient(api_key=k) for k in keys]
+        self._index = 0
+
+    def get(self, url: str, params: dict | None = None) -> dict | list | None:
+        client = self._clients[self._index % len(self._clients)]
+        self._index += 1
+        return client.get(url, params)
