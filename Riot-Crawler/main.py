@@ -16,6 +16,8 @@ from crawler.rank_fetcher import save_cache, fetch_rank_by_puuid
 
 
 def crawl(matches_per_player: int = 10, players_per_division: int = 100, save_interval: int = 10):
+    # Wichtig: nur EIN Key pro Lauf — PUUIDs sind an das Produkt gebunden, das sie
+    # ausgegeben hat, und lassen sich nicht mit einem anderen Key weiterverarbeiten.
     client = RiotClient()
 
     print("=== Seed-Phase ===")
