@@ -51,6 +51,15 @@ def build_dataset() -> pd.DataFrame:
             else:
                 tier = rank = lp = wins = losses = total_matches = win_rate = None
 
+            flex_data = p.get("flexRank")
+            flex_tier = flex_data["tier"] if flex_data else None
+            flex_rank = flex_data["rank"] if flex_data else None
+            flex_lp = flex_data["leaguePoints"] if flex_data else None
+
+            mastery_data = p.get("championMastery")
+            champion_mastery_level = mastery_data["championLevel"] if mastery_data else None
+            champion_mastery_points = mastery_data["championPoints"] if mastery_data else None
+
             # game_name + tagline direkt aus Match-Daten (kein extra API-Call nötig)
             game_name = p.get("riotIdGameName") or (account_cache.get(p["puuid"]) or {}).get("gameName")
             tag_line = p.get("riotIdTagline") or (account_cache.get(p["puuid"]) or {}).get("tagLine")
@@ -69,6 +78,13 @@ def build_dataset() -> pd.DataFrame:
                 "losses": losses,
                 "total_matches": total_matches,
                 "win_rate": win_rate,
+                "summoner_level": p.get("summonerLevel"),
+                "flex_tier": flex_tier,
+                "flex_rank": flex_rank,
+                "flex_lp": flex_lp,
+                "champion_name": p.get("championName"),
+                "champion_mastery_level": champion_mastery_level,
+                "champion_mastery_points": champion_mastery_points,
                 "match_duration_s": game_duration,
                 "win": int(p["win"]),
             })
@@ -115,7 +131,9 @@ def build_dataset() -> pd.DataFrame:
     df.to_csv(OUT_DIR / "matches.csv", index=False, sep=";", decimal=",")
 
     print(f"Dataset: {len(df)} Zeilen, {df['match_id'].nunique()} Matches")
-    print(f"Neue Spalten: wins, losses, total_matches, win_rate, match_duration_s, main_role, role_consistency, unique_teammates")
+    print(f"Neue Spalten: wins, losses, total_matches, win_rate, summoner_level, flex_tier, flex_rank, flex_lp, "
+          f"champion_name, champion_mastery_level, champion_mastery_points, match_duration_s, main_role, "
+          f"role_consistency, unique_teammates")
 
     # Fill in missing account info
     if not account_cache or len(account_cache) < df["puuid"].nunique():
