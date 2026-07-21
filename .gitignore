@@ -45,3 +45,9 @@ Riot-Crawler/data/processed/
 
 # Local notebooks and checkpoints
 .ipynb_checkpoints/
+
+# Spieler-Listen (echte Riot-IDs) und generierte Team-Aufstellungen im Root.
+# Nur die Format-Vorlage players_example.csv bleibt versioniert.
+/*.csv
+/*.CSV
+!players_example.csv
