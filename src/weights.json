@@ -1,0 +1,132 @@
+{
+  "description": "Empirisch (Regression, 75%-Train) hergeleitete Gewichte fuer die individuelle Spielerstaerke. Anzuwenden auf z-standardisierte Faktoren (mean/std unten).",
+  "weights": {
+    "rank": 2.4637,
+    "league_points": 2.8294,
+    "winrate": 1.1499
+  },
+  "standardization": {
+    "rank": {
+      "column": "rank_score",
+      "mean": 1985.236,
+      "std": 826.802,
+      "median": 2200.0
+    },
+    "league_points": {
+      "column": "lp",
+      "mean": 549.2884,
+      "std": 889.4002,
+      "median": 69.0
+    },
+    "winrate": {
+      "column": "win_rate",
+      "mean": 0.5133,
+      "std": 0.0623,
+      "median": 0.5116
+    }
+  },
+  "role_importance": {
+    "TOP_diff": 0.9516,
+    "JUNGLE_diff": 1.1308,
+    "MIDDLE_diff": 0.9541,
+    "BOTTOM_diff": 0.9148,
+    "UTILITY_diff": 1.051
+  },
+  "candidate_auc_table": [
+    {
+      "factor": "rank",
+      "cv_auc": 0.6424,
+      "delta_auc": 0.1424,
+      "accepted": true
+    },
+    {
+      "factor": "league_points",
+      "cv_auc": 0.6756,
+      "delta_auc": 0.0331,
+      "accepted": true
+    },
+    {
+      "factor": "winrate",
+      "cv_auc": 0.7296,
+      "delta_auc": 0.0541,
+      "accepted": true
+    },
+    {
+      "factor": "matches",
+      "cv_auc": 0.7305,
+      "delta_auc": 0.0009,
+      "accepted": false
+    },
+    {
+      "factor": "summoner_level",
+      "cv_auc": 0.7307,
+      "delta_auc": 0.0011,
+      "accepted": false
+    },
+    {
+      "factor": "champion_mastery",
+      "cv_auc": 0.7299,
+      "delta_auc": 0.0003,
+      "accepted": false
+    },
+    {
+      "factor": "flex_rank",
+      "cv_auc": 0.7268,
+      "delta_auc": -0.0003,
+      "accepted": false,
+      "note": "nur Subset mit Flex"
+    }
+  ],
+  "team_baseline_auc": 0.6716,
+  "team_factor_table": [
+    {
+      "factor": "role_decomposition",
+      "cv_auc": 0.6709,
+      "delta_auc": -0.0007,
+      "accepted": false
+    },
+    {
+      "factor": "role_synergies",
+      "cv_auc": 0.6692,
+      "delta_auc": -0.0024,
+      "accepted": false
+    },
+    {
+      "factor": "lp_variance",
+      "cv_auc": 0.6702,
+      "delta_auc": -0.0014,
+      "accepted": false
+    },
+    {
+      "factor": "weakest_link",
+      "cv_auc": 0.6704,
+      "delta_auc": -0.0012,
+      "accepted": false
+    }
+  ],
+  "common_baseline": {
+    "baseline_auc": 0.7296,
+    "core_leave_one_out": {
+      "rank": 0.0234,
+      "league_points": 0.0368,
+      "winrate": 0.0541
+    },
+    "extra_individual": {
+      "matches": 0.0009,
+      "summoner_level": 0.0011,
+      "champion_mastery": 0.0003
+    },
+    "team": {
+      "role_decomposition": 0.0004,
+      "role_synergies": -0.0014,
+      "lp_variance": -0.0009,
+      "weakest_link": -0.001
+    }
+  },
+  "holdout": {
+    "auc": 0.732,
+    "accuracy": 0.67,
+    "stronger_team_wins": 0.6688,
+    "n_matches": 1588
+  }
+}
