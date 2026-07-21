@@ -31,9 +31,17 @@ class RiotClient:
 
         self._timestamps.append(time.time())
 
-    def get(self, url: str, params: dict | None = None) -> dict | list | None:
+    def get(self, url: str, params: dict | None = None, _retries: int = 5) -> dict | list | None:
         self._enforce_rate_limits()
-        resp = self.session.get(url, params=params)
+
+        try:
+            resp = self.session.get(url, params=params)
+        except requests.exceptions.ConnectionError as e:
+            if _retries <= 0:
+                raise
+            print(f"  [connection error] {e}. Retrying in 5s...")
+            time.sleep(5)
+            return self.get(url, params, _retries=_retries - 1)
 
         if resp.status_code == 429:
             retry_after = int(resp.headers.get("Retry-After", 10))
