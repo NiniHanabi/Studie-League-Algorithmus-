@@ -1,0 +1,60 @@
+{
+  "bands": {
+    "low": {
+      "weights": {
+        "rank": 1.279,
+        "league_points": 0.0325,
+        "winrate": 1.2462
+      },
+      "factor_std": {
+        "rank": 430.81,
+        "league_points": 29.03,
+        "winrate": 0.07
+      },
+      "cv_auc": 0.7549,
+      "holdout_auc": 0.7789,
+      "stronger_team_wins": 0.7063,
+      "n_train": 1473,
+      "n_test": 538
+    },
+    "mid": {
+      "weights": {
+        "rank": 1.3302,
+        "league_points": 0.1929,
+        "winrate": 0.8655
+      },
+      "factor_std": {
+        "rank": 415.29,
+        "league_points": 103.62,
+        "winrate": 0.05
+      },
+      "cv_auc": 0.7078,
+      "holdout_auc": 0.6809,
+      "stronger_team_wins": 0.6362,
+      "n_train": 1717,
+      "n_test": 536
+    },
+    "high": {
+      "weights": {
+        "rank": 0.0018,
+        "league_points": 3.8237,
+        "winrate": 1.1199
+      },
+      "factor_std": {
+        "rank": 61.65,
+        "league_points": 933.99,
+        "winrate": 0.04
+      },
+      "cv_auc": 0.7259,
+      "holdout_auc": 0.7443,
+      "stronger_team_wins": 0.6673,
+      "n_train": 1577,
+      "n_test": 514
+    }
+  },
+  "band_label": {
+    "low": "Iron–Gold",
+    "mid": "Platin–Diamond",
+    "high": "Master+"
+  }
+}
