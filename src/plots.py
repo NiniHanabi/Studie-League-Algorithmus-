@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
 WEIGHTS_PATH = Path(__file__).resolve().parent / "weights.json"
+STRAT_PATH = Path(__file__).resolve().parent / "stratification.json"
 FIG_DIR = Path(__file__).resolve().parent.parent / "figures"
 
 # --- Farben (aus der validierten Referenz-Palette) ---
@@ -31,6 +32,9 @@ INK = "#0b0b0b"      # Primaertext
 INK2 = "#52514e"     # Sekundaertext
 GRID = "#e6e5e1"     # zuruecktretendes Raster
 REJECT_ZONE = "#f4f3f0"  # sehr helle Verwerfungszone
+
+# Sequenzielle Blau-Rampe fuer die GEORDNETEN Elo-Baender (hell = niedrig, dunkel = hoch)
+BAND_COLOR = {"low": "#86b6ef", "mid": "#3987e5", "high": "#184f95"}
 
 # Anzeigenamen der Faktoren (deutsch)
 LABELS = {
@@ -300,6 +304,74 @@ def plot_common(model):
     return fig
 
 
+def plot_stratification(strat):
+    """Abbildung 4: Faktor-Gewichte ueber die drei Elo-Baender.
+
+    Zwei Panels. Links: standardisierte Gewichte je Faktor, gruppiert nach Band
+    (zeigt, dass Rang und League Points ueber die Elo-Baender die Rollen tauschen,
+    Win Rate dagegen stabil bleibt). Rechts: Anteil "staerkeres Team gewinnt"
+    je Band (Vorhersageguete ueber die Niveaus).
+    """
+    bands = strat["bands"]
+    labels = strat["band_label"]
+    order = ["low", "mid", "high"]
+    factors = [("rank", "Rang"), ("league_points", "League Points"),
+               ("winrate", "Win Rate")]
+
+    fig, (axA, axB) = plt.subplots(
+        1, 2, figsize=(11, 5.3), gridspec_kw={"width_ratios": [3, 1.15]})
+    _style_axes(axA)
+    _style_axes(axB)
+
+    # --- Panel A: gruppierte Balken (Faktor x Band) ---
+    xf = list(range(len(factors)))
+    w = 0.26
+    for j, b in enumerate(order):
+        vals = [bands[b]["weights"][f] for f, _ in factors]
+        xs = [x + (j - 1) * w for x in xf]
+        axA.bar(xs, vals, width=w, color=BAND_COLOR[b], label=labels[b], zorder=3)
+        for x, v in zip(xs, vals):
+            axA.text(x, v + 0.06, de(v, 2), ha="center", va="bottom",
+                     fontsize=8, color=INK)
+    axA.axhline(0, color=GRID, linewidth=1.0)
+    axA.set_xticks(xf)
+    axA.set_xticklabels([name for _, name in factors], fontsize=10, color=INK)
+    axA.set_ylim(0, 4.2)
+    axA.yaxis.set_major_formatter(FuncFormatter(lambda v, _: de(v, 1)))
+    axA.set_ylabel("Standardisiertes Gewicht (pro bandinterner Streuung)",
+                   color=INK2, fontsize=9.5)
+    axA.grid(axis="y", color=GRID, linewidth=0.8)
+    axA.set_axisbelow(True)
+    axA.legend(frameon=False, fontsize=9, loc="upper left", title="Elo-Band",
+               title_fontsize=9)
+
+    # --- Panel B: staerkeres Team gewinnt je Band ---
+    xs = list(range(len(order)))
+    vals = [bands[b]["stronger_team_wins"] for b in order]
+    axB.bar(xs, vals, width=0.62, color=[BAND_COLOR[b] for b in order], zorder=3)
+    for x, v in zip(xs, vals):
+        axB.text(x, v + 0.006, f"{v*100:.1f} %".replace(".", ","),
+                 ha="center", va="bottom", fontsize=9, color=INK, fontweight="bold")
+    axB.set_xticks(xs)
+    axB.set_xticklabels([labels[b] for b in order], fontsize=9, color=INK, rotation=12)
+    axB.set_ylim(0.5, 0.76)
+    axB.yaxis.set_major_formatter(FuncFormatter(lambda v, _: de(v, 2)))
+    axB.set_title("Stärkeres Team gewinnt\n(Achsenstart 0,50 = Zufall)", color=INK,
+                  fontsize=10.5, fontweight="bold", loc="left")
+    axB.grid(axis="y", color=GRID, linewidth=0.8)
+    axB.set_axisbelow(True)
+
+    fig.tight_layout(rect=[0, 0, 1, 0.9])
+    fig.text(0.012, 0.965,
+             "Faktor-Gewichte über die Elo-Bänder: Rang und League Points tauschen die Rollen",
+             color=INK, fontsize=12.5, fontweight="bold", ha="left", va="top")
+    fig.text(0.012, 0.925,
+             "Getrennte Regression je Band · Gewicht = Effekt pro bandinterner "
+             "Standardabweichung · Win Rate bleibt als Einziges stabil",
+             color=INK2, fontsize=9.5, ha="left", va="top")
+    return fig
+
+
 def main():
     model = json.loads(WEIGHTS_PATH.read_text(encoding="utf-8"))
     FIG_DIR.mkdir(exist_ok=True)
@@ -309,6 +381,9 @@ def main():
         "abb2_forward_selection": plot_forward(model),
         "abb3_gemeinsames_basismodell": plot_common(model),
     }
+    if STRAT_PATH.exists():
+        strat = json.loads(STRAT_PATH.read_text(encoding="utf-8"))
+        figures["abb4_elo_stratifizierung"] = plot_stratification(strat)
     for name, fig in figures.items():
         for ext in ("png", "pdf"):
             path = FIG_DIR / f"{name}.{ext}"
