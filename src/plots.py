@@ -15,13 +15,19 @@ Speichert je Abbildung als PNG (300 dpi) und PDF (Vektor) in ../figures/.
 import json
 from pathlib import Path
 
+import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
+from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
+from matplotlib.patches import Rectangle
+
+from data_prep import TIER_ORDER
 
 WEIGHTS_PATH = Path(__file__).resolve().parent / "weights.json"
 STRAT_PATH = Path(__file__).resolve().parent / "stratification.json"
+TIER_PATH = Path(__file__).resolve().parent / "tier_analysis.json"
 FIG_DIR = Path(__file__).resolve().parent.parent / "figures"
 
 # --- Farben (aus der validierten Referenz-Palette) ---
@@ -372,6 +378,96 @@ def plot_stratification(strat):
     return fig
 
 
+def plot_tier(tier_data):
+    """Abbildung 5: Heatmap Tier x Faktor (Delta-AUC über dem Kernmodell).
+
+    Zeigt für jedes der 10 Tiers den inkrementellen Beitrag jedes Kandidaten.
+    Kernbotschaft: Kein Feld übersteigt den Rauschpegel seines Tiers (im
+    Spaltenkopf als ±Wert angegeben) -> die bunten Zellen sind Stichproben-
+    Rauschen, kein tier-spezifisches Signal. Werte in AUC × 10⁻³ (Tausendstel).
+    """
+    tiers = tier_data["tiers"]
+    threshold = tier_data["threshold"]
+    factors = [("matches", "Matches"), ("summoner_level", "Summoner Level"),
+               ("champion_mastery", "Champion Mastery"), ("flex", "Flex-Rang"),
+               ("role_decomposition", "Rollen-Wichtigkeit"),
+               ("role_synergies", "Rollen-Synergien"),
+               ("lp_variance", "LP-Varianz"), ("weakest_link", "Schwächstes Glied")]
+    tshort = {"IRON": "Iron", "BRONZE": "Bronze", "SILVER": "Silver", "GOLD": "Gold",
+              "EMERALD": "Emerald", "PLATINUM": "Platinum", "DIAMOND": "Diamond",
+              "MASTER": "Master", "GRANDMASTER": "GM", "CHALLENGER": "Challenger"}
+    tier_keys = sorted([t for t in tiers if tiers[t]["core_auc"] is not None],
+                       key=lambda t: TIER_ORDER[t])
+
+    nrows, ncols = len(factors), len(tier_keys)
+    M = np.full((nrows, ncols), np.nan)         # Delta-AUC in Tausendstel
+    credible = np.zeros((nrows, ncols), dtype=bool)
+    for j, t in enumerate(tier_keys):
+        std = tiers[t]["core_std"]
+        for i, (fkey, _) in enumerate(factors):
+            v = tiers[t]["deltas"].get(fkey)
+            if v is None:
+                continue
+            M[i, j] = v * 1000
+            credible[i, j] = (v > threshold) and (std is not None and v > std)
+
+    # Diverging: rot (schadet) -> neutral -> blau (hilft); auf ±20 begrenzt
+    cmap = LinearSegmentedColormap.from_list(
+        "dauc", ["#b5271b", "#f0efec", "#184f95"])
+    cmap.set_bad("#e6e5e1")
+    norm = TwoSlopeNorm(vmin=-20, vcenter=0, vmax=20)
+
+    fig, ax = plt.subplots(figsize=(12.5, 6.2))
+    mesh = ax.pcolormesh(np.arange(ncols + 1), np.arange(nrows + 1),
+                         np.ma.masked_invalid(M), cmap=cmap, norm=norm,
+                         edgecolors="white", linewidth=2)
+
+    # Zellbeschriftung + Rahmen um glaubwürdige Zellen
+    for i in range(nrows):
+        for j in range(ncols):
+            if np.isnan(M[i, j]):
+                ax.text(j + 0.5, i + 0.5, "n/a", ha="center", va="center",
+                        fontsize=8, color=INK2)
+                continue
+            iv = int(round(M[i, j]))
+            txt = f"{iv:+d}" if iv != 0 else "0"
+            ax.text(j + 0.5, i + 0.5, txt, ha="center", va="center", fontsize=9,
+                    color="white" if abs(iv) > 10 else INK)
+            if credible[i, j]:
+                ax.add_patch(Rectangle((j, i), 1, 1, fill=False,
+                                       edgecolor="black", linewidth=2.2))
+
+    ax.set_xticks([j + 0.5 for j in range(ncols)])
+    ax.set_xticklabels(
+        [f"{tshort[t]}\nn={tiers[t]['n']}\n±{tiers[t]['core_std']*1000:.0f}"
+         for t in tier_keys], fontsize=8.5, color=INK)
+    ax.set_yticks([i + 0.5 for i in range(nrows)])
+    ax.set_yticklabels([name for _, name in factors], fontsize=10, color=INK)
+    ax.invert_yaxis()                 # erster Faktor oben
+    ax.tick_params(length=0)
+    for s in ax.spines.values():
+        s.set_visible(False)
+    ax.set_xlim(0, ncols)
+    ax.set_ylim(nrows, 0)
+
+    cbar = fig.colorbar(mesh, ax=ax, fraction=0.025, pad=0.02,
+                        ticks=[-20, -10, 0, 10, 20], extend="both")
+    cbar.ax.set_yticklabels(["−20", "−10", "0", "+10", "+20"])
+    cbar.set_label("ΔAUC × 10⁻³  (blau = hilft, rot = schadet)",
+                   color=INK2, fontsize=9)
+    cbar.outline.set_visible(False)
+
+    fig.tight_layout(rect=[0, 0, 1, 0.9])
+    fig.text(0.012, 0.965,
+             "Faktor-Beitrag je Tier (ΔAUC) – alles im Rauschen",
+             color=INK, fontsize=13, fontweight="bold", ha="left", va="top")
+    fig.text(0.012, 0.925,
+             "Spaltenkopf: n und Rauschpegel ±(CV-Streuung) je Tier · kein Feld "
+             "übersteigt seinen Rauschpegel (kein Rahmen) → kein tier-spezifisches Signal",
+             color=INK2, fontsize=9.5, ha="left", va="top")
+    return fig
+
+
 def main():
     model = json.loads(WEIGHTS_PATH.read_text(encoding="utf-8"))
     FIG_DIR.mkdir(exist_ok=True)
@@ -384,6 +480,9 @@ def main():
     if STRAT_PATH.exists():
         strat = json.loads(STRAT_PATH.read_text(encoding="utf-8"))
         figures["abb4_elo_stratifizierung"] = plot_stratification(strat)
+    if TIER_PATH.exists():
+        tier_data = json.loads(TIER_PATH.read_text(encoding="utf-8"))
+        figures["abb5_tier_faktoren"] = plot_tier(tier_data)
     for name, fig in figures.items():
         for ext in ("png", "pdf"):
             path = FIG_DIR / f"{name}.{ext}"
