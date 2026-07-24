@@ -196,14 +196,16 @@ def enrich_strength(players, api, model):
             tier, div, lp = rank["tier"], rank["rank"], rank["leaguePoints"]
             wins, losses = rank.get("wins", 0), rank.get("losses", 0)
             total = wins + losses
+            wr = (wins / total) if total else np.nan
             rows.append({
                 "riot_id": p["riot_id"],
                 "rank_score": rank_component(tier, div),
                 "lp": float(lp),
-                "win_rate": (wins / total) if total else np.nan,
+                "win_rate": wr,
                 "tier": tier, "division": div, "ranked": True,
             })
-            print(f"  {p['riot_id']:<28} {tier} {div} {lp} LP")
+            wr_txt = f"{wr*100:.0f}% WR ({total} Sp.)" if total else "keine Spiele"
+            print(f"  {p['riot_id']:<28} {tier} {div} {lp} LP · {wr_txt}")
         else:
             rows.append({"riot_id": p["riot_id"], "rank_score": np.nan, "lp": np.nan,
                          "win_rate": np.nan, "tier": "UNRANKED", "division": "",
@@ -219,6 +221,8 @@ def enrich_strength(players, api, model):
         p["strength"] = float(strength[p["riot_id"]])
         p["tier"] = meta[p["riot_id"]]["tier"]
         p["division"] = meta[p["riot_id"]]["division"]
+        p["lp"] = meta[p["riot_id"]]["lp"]
+        p["win_rate"] = meta[p["riot_id"]]["win_rate"]
         p["ranked"] = meta[p["riot_id"]]["ranked"]
     return players
 
@@ -329,14 +333,19 @@ def print_teams(title, teams, players):
     print("\n" + "=" * 60)
     print(title)
     print("=" * 60)
+    print("   (Stärke = gewichtete Kombination aus Rang, LP und Win Rate)")
     for t, team in enumerate(teams, 1):
         print(f"\nTeam {t}  (Ø Stärke {team_mean(team, players):+.3f})")
         for r in ROLES:
             p = players[team[r]]
             off = "" if p["main"] == r else "  (Zweitrolle)"
             rank = f"{p['tier']} {p['division']}".strip()
-            print(f"   {ROLE_LABEL[r]:<8} {p['riot_id']:<26} {rank:<16}"
-                  f"Stärke {p['strength']:+.3f}{off}")
+            lp = p.get("lp")
+            wr = p.get("win_rate")
+            lp_s = f"{int(lp)} LP" if lp is not None and not pd.isna(lp) else "—"
+            wr_s = f"{wr*100:.0f}% WR" if wr is not None and not pd.isna(wr) else "—"
+            print(f"   {ROLE_LABEL[r]:<8} {p['riot_id']:<24} {rank:<14}"
+                  f"{lp_s:>7} {wr_s:>7}   Stärke {p['strength']:+.3f}{off}")
     means = [team_mean(t, players) for t in teams]
     if len(means) > 1:
         print(f"\n  Spanne der Team-Ø-Stärke: {max(means) - min(means):.3f} "
@@ -350,6 +359,7 @@ def teams_to_dataframe(teams, players, mode):
             p = players[team[r]]
             rec.append({"modus": mode, "team": t, "rolle": ROLE_LABEL[r],
                         "riot_id": p["riot_id"], "rang": f"{p['tier']} {p['division']}".strip(),
+                        "lp": p.get("lp"), "win_rate": p.get("win_rate"),
                         "main_rolle": p["main"] == r, "staerke": round(p["strength"], 4)})
     return pd.DataFrame(rec)
 
