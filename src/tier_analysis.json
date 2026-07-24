@@ -1,0 +1,165 @@
+{
+  "tiers": {
+    "IRON": {
+      "n": 118,
+      "core_auc": 0.8156,
+      "core_std": 0.0705,
+      "deltas": {
+        "matches": -0.0117,
+        "summoner_level": -0.0164,
+        "champion_mastery": 0.013,
+        "role_decomposition": -0.0618,
+        "role_synergies": -0.027,
+        "lp_variance": -0.0126,
+        "weakest_link": -0.0155,
+        "flex": 0.0149
+      }
+    },
+    "BRONZE": {
+      "n": 500,
+      "core_auc": 0.7689,
+      "core_std": 0.018,
+      "deltas": {
+        "matches": -0.0008,
+        "summoner_level": -0.0006,
+        "champion_mastery": -0.001,
+        "role_decomposition": -0.0036,
+        "role_synergies": -0.0027,
+        "lp_variance": -0.0005,
+        "weakest_link": -0.003,
+        "flex": -0.003
+      }
+    },
+    "SILVER": {
+      "n": 738,
+      "core_auc": 0.7572,
+      "core_std": 0.0449,
+      "deltas": {
+        "matches": 0.0034,
+        "summoner_level": -0.0006,
+        "champion_mastery": 0.0008,
+        "role_decomposition": -0.0033,
+        "role_synergies": -0.0007,
+        "lp_variance": 0.0025,
+        "weakest_link": 0.0004,
+        "flex": -0.0055
+      }
+    },
+    "GOLD": {
+      "n": 655,
+      "core_auc": 0.7395,
+      "core_std": 0.0348,
+      "deltas": {
+        "matches": 0.0008,
+        "summoner_level": -0.0039,
+        "champion_mastery": 0.0075,
+        "role_decomposition": -0.0064,
+        "role_synergies": 0.0006,
+        "lp_variance": -0.0019,
+        "weakest_link": -0.0035,
+        "flex": -0.0033
+      }
+    },
+    "PLATINUM": {
+      "n": 804,
+      "core_auc": 0.7019,
+      "core_std": 0.0456,
+      "deltas": {
+        "matches": -0.0013,
+        "summoner_level": -0.001,
+        "champion_mastery": 0.0021,
+        "role_decomposition": -0.0029,
+        "role_synergies": 0.0003,
+        "lp_variance": -0.0022,
+        "weakest_link": -0.0034,
+        "flex": -0.0014
+      }
+    },
+    "EMERALD": {
+      "n": 638,
+      "core_auc": 0.6854,
+      "core_std": 0.0767,
+      "deltas": {
+        "matches": -0.0013,
+        "summoner_level": -0.0026,
+        "champion_mastery": -0.0041,
+        "role_decomposition": -0.0181,
+        "role_synergies": 0.0101,
+        "lp_variance": -0.0012,
+        "weakest_link": -0.0007,
+        "flex": -0.0028
+      }
+    },
+    "DIAMOND": {
+      "n": 910,
+      "core_auc": 0.6888,
+      "core_std": 0.0228,
+      "deltas": {
+        "matches": 0.0087,
+        "summoner_level": -0.0007,
+        "champion_mastery": -0.0003,
+        "role_decomposition": -0.013,
+        "role_synergies": -0.0033,
+        "lp_variance": -0.0059,
+        "weakest_link": -0.0065,
+        "flex": -0.0014
+      }
+    },
+    "MASTER": {
+      "n": 866,
+      "core_auc": 0.7771,
+      "core_std": 0.031,
+      "deltas": {
+        "matches": -0.0017,
+        "summoner_level": -0.0024,
+        "champion_mastery": 0.0015,
+        "role_decomposition": -0.0047,
+        "role_synergies": -0.0044,
+        "lp_variance": -0.0016,
+        "weakest_link": -0.0013,
+        "flex": -0.0012
+      }
+    },
+    "GRANDMASTER": {
+      "n": 960,
+      "core_auc": 0.7177,
+      "core_std": 0.0221,
+      "deltas": {
+        "matches": 0.0002,
+        "summoner_level": -0.0003,
+        "champion_mastery": -0.0004,
+        "role_decomposition": 0.0032,
+        "role_synergies": -0.0062,
+        "lp_variance": -0.0002,
+        "weakest_link": -0.0008,
+        "flex": -0.0014
+      }
+    },
+    "CHALLENGER": {
+      "n": 166,
+      "core_auc": 0.6496,
+      "core_std": 0.0893,
+      "deltas": {
+        "matches": 0.0074,
+        "summoner_level": 0.0014,
+        "champion_mastery": -0.0044,
+        "role_decomposition": -0.0155,
+        "role_synergies": -0.0008,
+        "lp_variance": 0.015,
+        "weakest_link": 0.0093,
+        "flex": -0.0216
+      }
+    }
+  },
+  "threshold": 0.002,
+  "candidate_label": {
+    "matches": "Matches",
+    "summoner_level": "Level",
+    "champion_mastery": "Mastery",
+    "flex": "Flex",
+    "role_decomposition": "Rollen-Wichtigkeit",
+    "role_synergies": "Rollen-Synergien",
+    "lp_variance": "LP-Varianz",
+    "weakest_link": "Schwaechstes Glied"
+  }
+}
