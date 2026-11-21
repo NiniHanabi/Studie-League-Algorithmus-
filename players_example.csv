@@ -1,11 +1,13 @@
-RIOT ID;Main Position;Second Positions
-BeispielName1#EUW;Top;Jungle
-BeispielName2#EUW;Jungle;Mid
-BeispielName3#EUW;Mid;Top,ADC
-BeispielName4#EUW;ADC;Support
-BeispielName5#EUW;Support;ADC
-BeispielName6#EUW;Top;
-BeispielName7#EUW;Jungle;Support
-BeispielName8#EUW;Mid;
-BeispielName9#EUW;ADC;Mid
-BeispielName10#EUW;Support;Jungle
+RIOT ID;Main Position;Second Positions;With;Not With
+BeispielName1#EUW;Top;Jungle;BeispielName2#EUW;
+BeispielName2#EUW;Jungle;Mid;;
+BeispielName3#EUW;Mid;Top,ADC;;BeispielName8#EUW
+BeispielName4#EUW;ADC;Support;BeispielName5#EUW;
+BeispielName5#EUW;Support;ADC;;
+BeispielName6#EUW;Top;;;
+BeispielName7#EUW;Jungle;Support;;
+BeispielName8#EUW;Mid;;;
+BeispielName9#EUW;ADC;Mid;;
+BeispielName10#EUW;Support;Jungle;;
+BeispielName11#EUW;Top;Mid;BeispielName6#EUW;
+BeispielName12#EUW;Jungle;;;
