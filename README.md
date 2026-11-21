@@ -11,27 +11,101 @@ Keeping both projects in the same repository is a good fit here because they sha
 
 ```text
 .
-├── src/                     # Correlation and scoring logic
+├── src/                     # Strength model, team builder and benchmarks
+├── players_example.csv      # Input template for the team builder
 └── Riot-Crawler/            # Data collection and analysis pipeline
 	├── crawler/             # Riot API access and fetching
 	├── analysis/            # Dataset building and statistical analysis
 	└── data/                # Raw and processed data artifacts
 ```
 
-## Project 1: Correlation Model
+## Project 1: Strength Model and Team Builder
 
-The code in `src/` is the lightweight algorithmic part of the repo. It focuses on calculating player and team strength based on normalized features such as rank, LP, win rate, match volume, role consistency, and team composition.
+The code in `src/` derives empirical factor weights from the crawled match data, uses them to calculate individual player strength, and forms League teams from a player list.
 
-Run it from the repository root with:
-
-```bash
-python src/main.py
-```
+| Module | Purpose |
+| --- | --- |
+| `data_prep.py` | Loads, cleans and splits `matches.csv` from the crawler |
+| `regression.py` | Derives the factor weights via logistic regression (cross-validated AUC) and writes `weights.json` |
+| `main.py` | Calculates individual and team strength with the weights from `weights.json` |
+| `stratification.py`, `tier_analysis.py` | Check whether the weights are stable across Elo bands and individual tiers |
+| `plots.py` | Figures for the factor selection (Delta-AUC, forward selection, tier heatmap) |
+| `team_builder.py` | Builds teams from a player CSV (see below) |
+| `benchmark_gurobi.py` | Benchmark: Simulated Annealing vs. the exact Gurobi solver |
 
 Required packages for this part:
 
 ```bash
-pip install numpy pandas
+pip install numpy pandas scipy scikit-learn matplotlib requests
+pip install gurobipy   # optional, needs a (free academic) Gurobi license
+```
+
+Run the strength model from the repository root with:
+
+```bash
+python src/regression.py   # once, creates src/weights.json
+python src/main.py
+```
+
+### Team Builder
+
+`team_builder.py` reads a player list, fetches each player's Solo/Duo rank via the Riot API (EUW), calculates their strength with `weights.json`, and builds two lineups:
+
+1. **Strongest teams**: strength is bundled (team 1 is the strongest).
+2. **Balanced teams**: team strengths are as equal as possible.
+
+Both modes are solved twice: heuristically (sorting and Simulated Annealing) and, if `gurobipy` is installed, exactly with Gurobi.
+
+```bash
+python src/team_builder.py players_example.csv        # Gurobi time limit 60 s per step
+python src/team_builder.py players_example.csv 120    # custom time limit in seconds
+```
+
+A Riot API key is required, read from `RIOT_API_KEY`, `Riot-Crawler/.env` or `riot.txt`. Development keys expire after 24 hours.
+
+**Input format** (see [players_example.csv](players_example.csv)), semicolon- or comma-separated, header row required:
+
+| Column | Required | Content |
+| --- | --- | --- |
+| `RIOT ID` | yes | `Name#Tagline` |
+| `Main Position` | yes | one role: Top, Jungle, Mid, ADC (or Bot), Support |
+| `Second Positions` | no | further roles, comma-separated |
+| `With` | no | Riot IDs this player must be in the same team with, comma-separated |
+| `Not With` | no | Riot IDs this player must not be in the same team with |
+
+- Role names accept common synonyms (`jgl`, `bot`, `supp`, ...).
+- The preference columns may also be called `Mit` / `Nicht mit` or written as `not_with`, `Not-With`, `NotWith`.
+- Riot IDs in preferences ignore case and spaces.
+- A preference applies to both players, so it only has to be entered once.
+
+**Priorities** (strictly in this order):
+
+1. **Preferences are hard constraints** and are always fulfilled 100 %. `With` means both play in the same team (neither is a reserve). If necessary, a player gets a role they did not list.
+2. As few players as possible on a role they did not list.
+3. As few players as possible on their second role.
+4. The goal of the mode (strongest or balanced teams).
+
+**Things to know:**
+
+- **Player count:** If the number of players is not a multiple of 5, the surplus players become reserves. They are chosen by the priorities above; on a tie, the weakest players sit out.
+- **Impossible preferences:** If the preferences cannot be fulfilled, the program stops with an explanation. This happens for a `With` group of more than 5 players, a `With` chain that contradicts a `Not With`, or more players in groups than there are slots.
+- **Unranked players:** Players without a Solo/Duo rank get the model's median strength.
+
+**Output:** the teams per variant, the fulfilled preferences, and a comparison of the spread of team strengths. Four files are written next to the input CSV:
+
+- `<name>_staerkste_teams.csv`
+- `<name>_ausgeglichene_teams.csv`
+- `<name>_staerkste_teams_gurobi.csv`
+- `<name>_ausgeglichene_teams_gurobi.csv`
+
+Each file lists team, role, rank, strength and role type (main, second role, or not listed) per player, plus the reserves.
+
+### Benchmark
+
+```bash
+python src/benchmark_gurobi.py            # scaling benchmark on synthetic player pools
+python src/benchmark_gurobi.py duel 30    # SA vs. Gurobi with the same time budget
+python src/benchmark_gurobi.py players.csv 60   # comparison on the players of a CSV
 ```
 
 ## Project 2: Riot-Crawler
