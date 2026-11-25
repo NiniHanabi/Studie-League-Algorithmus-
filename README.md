@@ -32,6 +32,7 @@ The code in `src/` derives empirical factor weights from the crawled match data,
 | `plots.py` | Figures for the factor selection (Delta-AUC, forward selection, tier heatmap) |
 | `team_builder.py` | Builds teams from a player CSV (see below) |
 | `benchmark_gurobi.py` | Benchmark: Simulated Annealing vs. the exact Gurobi solver |
+| `webapp.py` | Local web interface for the team builder (see below) |
 
 Required packages for this part:
 
@@ -62,6 +63,15 @@ python src/team_builder.py players_example.csv 120    # custom time limit in sec
 ```
 
 A Riot API key is required, read from `RIOT_API_KEY`, `Riot-Crawler/.env` or `riot.txt`. Development keys expire after 24 hours.
+
+**Web interface:** the same algorithm with a browser UI. Enter players in a table or import a CSV (drag and drop works), then view the teams, KPIs and strength comparison and download them as CSV. It needs no extra packages and runs only on `127.0.0.1`.
+
+```bash
+python src/webapp.py              # opens http://127.0.0.1:8765/
+python src/webapp.py 9000 --no-browser
+```
+
+The API key can also be entered in the UI. That key is only kept in memory for the running session. Ranks are cached for 15 minutes, so recalculating after editing preferences is instant.
 
 **Input format** (see [players_example.csv](players_example.csv)), semicolon- or comma-separated, header row required:
 
