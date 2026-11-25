@@ -58,8 +58,8 @@ python src/main.py
 Both modes are solved twice: heuristically (sorting and Simulated Annealing) and, if `gurobipy` is installed, exactly with Gurobi.
 
 ```bash
-python src/team_builder.py players_example.csv        # Gurobi time limit 60 s per step
-python src/team_builder.py players_example.csv 120    # custom time limit in seconds
+python src/team_builder.py players_example.csv        # Gurobi time limit 60 s in total
+python src/team_builder.py players_example.csv 120    # custom total time limit in seconds
 ```
 
 A Riot API key is required, read from `RIOT_API_KEY`, `Riot-Crawler/.env` or `riot.txt`. Development keys expire after 24 hours.
