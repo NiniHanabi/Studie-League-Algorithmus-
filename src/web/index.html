@@ -114,14 +114,14 @@
     <div class="actionbar-inner">
       <div class="ab-msg" id="ab-msg"></div>
       <div class="ab-right">
-        <label class="tl" id="tl-wrap" hidden data-tip="Maximale Rechenzeit je Gurobi-Schritt (es gibt drei Schritte).">
-          <span>Gurobi</span>
+        <label class="tl" id="tl-wrap" hidden data-tip="Maximale Rechenzeit für Gurobi insgesamt. Meist ist Gurobi früher fertig; mehr Zeit hilft vor allem großen Gruppen im Modus „Ausgeglichen“.">
+          <span>Gurobi max.</span>
           <select id="tl-select">
-            <option value="15">15 s</option>
             <option value="30">30 s</option>
-            <option value="60">60 s</option>
+            <option value="60">1 min</option>
             <option value="120">2 min</option>
             <option value="300">5 min</option>
+            <option value="600">10 min</option>
           </select>
         </label>
         <button type="button" class="btn btn-primary btn-large" id="build-btn">Teams bilden</button>

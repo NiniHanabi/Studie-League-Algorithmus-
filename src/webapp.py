@@ -234,6 +234,7 @@ def result_payload(res, players, together, apart):
         "id": res["name"],
         "mode": "strongest" if res["mode"] == "staerkste" else "balanced",
         "solver": res["solver"], "status": res["status"], "gap": res["gap"],
+        "gurobi_note": res.get("gurobi_note"), "objective": res.get("objective"),
         "teams": team_objs,
         "reserves": [_member(players[i], None) for i in res["reserves"]],
         "metrics": {

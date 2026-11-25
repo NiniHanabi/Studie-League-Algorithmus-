@@ -66,6 +66,7 @@ function rankText(m) {
 
 /* ---------- Zustand ------------------------------------------------------- */
 let uid = 0;
+const TIME_LIMITS = [30, 60, 120, 300, 600]; // Gurobi-Gesamtzeit in s, wie die Optionen in index.html
 const state = {
   rows: [],
   status: null,
@@ -73,7 +74,7 @@ const state = {
   builtFrom: null,     // Eingabe-Signatur der letzten Berechnung
   view: { mode: "balanced", solver: null },
   building: false,
-  timeLimit: 60,
+  timeLimit: 120,
 };
 const rowEls = new Map();
 
@@ -103,7 +104,8 @@ function restore() {
     const d = JSON.parse(localStorage.getItem(STORE_KEY) || "null");
     if (!d) return;
     state.rows = (d.rows || []).map(newRow);
-    if (d.timeLimit) state.timeLimit = d.timeLimit;
+    // nur Werte übernehmen, die es in der Auswahl gibt - sonst zeigt sie etwas anderes, als gerechnet wird
+    if (TIME_LIMITS.includes(d.timeLimit)) state.timeLimit = d.timeLimit;
   } catch { /* ignorieren */ }
 }
 
@@ -811,6 +813,7 @@ function showProgress(total) {
   section.scrollIntoView({ behavior: "smooth", block: "start" });
 
   let waitTimer = null;
+  let gurobiTimer = null;
   const activate = (id) => {
     let reached = false;
     for (const s of steps) {
@@ -831,8 +834,17 @@ function showProgress(total) {
           caption.textContent = "Rollen und Präferenzen werden abgeglichen …";
         }
         if (ev.stage === "gurobi") {
-          caption.textContent = `Gurobi rechnet – je Schritt bis zu ${ev.time_limit} s.`;
-          stepEls.get("gurobi").meta.textContent = `max. ${Math.round(3 * ev.time_limit / 60 * 10) / 10} min`;
+          caption.textContent = `Gurobi rechnet – höchstens ${durText(ev.time_limit)}, oft deutlich kürzer.`;
+          // Countdown bis zum Zeitlimit (Gurobi hört spätestens dann auf)
+          const meta = stepEls.get("gurobi").meta;
+          const end = Date.now() + ev.time_limit * 1000;
+          const tick = () => {
+            const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+            meta.textContent = left > 0 ? `noch max. ${clock(left)}` : "gleich fertig …";
+            if (!left) clearInterval(gurobiTimer);
+          };
+          tick();
+          gurobiTimer = setInterval(tick, 1000);
         }
       } else if (ev.type === "progress") {
         clearInterval(waitTimer);
@@ -849,9 +861,12 @@ function showProgress(total) {
         caption.textContent = ev.message.replace(/^\[.*?\]\s*/, "");
       }
     },
-    stop() { clearInterval(waitTimer); },
+    stop() { clearInterval(waitTimer); clearInterval(gurobiTimer); },
   };
 }
+
+const clock = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+const durText = (s) => (s < 60 ? `${s} s` : `${Math.round(s / 6) / 10} min`.replace(".", ","));
 
 function showError(message) {
   const section = $("#results");
@@ -911,7 +926,7 @@ function renderResults(scroll = false) {
       })));
 
   const solverText = res.solver === "gurobi"
-    ? `Gurobi · ${res.status === "optimal" ? "beweisbar optimal" : res.status}${res.gap ? ` · Gap ${fmt(res.gap * 100)} %` : ""}`
+    ? `Gurobi · ${res.status === "optimal" ? "beweisbar optimal" : res.status}${res.gap ? ` · Gap ${fmt(res.gap * 100)} %` : ""}${res.objective === "linear" ? " · minimiert die Spanne" : ""}`
     : "Heuristik · Simulated Annealing";
   const meta = el("p", { class: "res-meta" },
     MODE_TEXT[res.mode], el("span", { class: "sep" }, "·"), solverText);
@@ -1040,9 +1055,16 @@ function notes(res, summary) {
   if (!summary.gurobi) {
     items.push(note("info", "Gurobi ist nicht installiert.",
       "Die Teams wurden mit der Heuristik gebildet. Für beweisbar optimale Einteilungen: pip install gurobipy + Lizenz."));
+  } else if (res.gurobi_note) {
+    items.push(note("info", "Gurobi übersprungen.",
+      `${res.gurobi_note} Die Teams wurden mit der Heuristik gebildet. Mit einer akademischen Lizenz (kostenlos für Studierende) entfällt die Grenze.`));
   } else if (res.solver === "gurobi" && res.status !== "optimal") {
     items.push(note("warn", "Zeitlimit erreicht.",
       "Gurobi hat die Optimalität in der vorgegebenen Zeit nicht bewiesen. Für ein besseres Ergebnis das Zeitlimit in der Leiste unten erhöhen."));
+  }
+  if (res.objective === "linear") {
+    items.push(note("info", "Lineare Zielfunktion.",
+      "Die eingeschränkte Gurobi-Lizenz erlaubt das quadratische Modell nur bis 200 Variablen. Gurobi minimiert hier deshalb die Spanne zwischen stärkstem und schwächstem Team."));
   }
   return items.length ? el("div", { class: "notes" }, items) : null;
 }
