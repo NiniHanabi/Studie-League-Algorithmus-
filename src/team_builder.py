@@ -41,7 +41,7 @@ Prioritaeten (lexikographisch):
   3. Moeglichst wenige Spieler auf ihrer Zweitrolle.
   4. Ziel des Modus (staerkste bzw. ausgeglichene Teams).
 
-Aufruf:  python team_builder.py <pfad/zur/spieler.csv> [gurobi-zeitlimit-s]
+Aufruf:  python team_builder.py <pfad/zur/spieler.csv> [gurobi-gesamtzeit-s]
 
 Voraussetzung: gueltiger Riot API Key (RIOT_API_KEY, Riot-Crawler/.env oder riot.txt)
 und weights.json (wird bei Bedarf ueber regression.py erzeugt).
@@ -723,23 +723,39 @@ def build_balanced(players, role_of, k, iters=30000, seed=42, together=(), apart
 # ---------------------------------------------------------------------------
 # Exakte Loesung mit Gurobi (Rolle + Team gemeinsam)
 # ---------------------------------------------------------------------------
-def _gurobi_model(players, pool, k, together, apart, all_play, time_limit):
+GRB_SIZE_LIMIT = 10010  # Fehlercode "Model too large for size-limited license"
+
+
+def _time_left(end, share=1.0):
+    """Restzeit bis zum Zeitpunkt end (time.monotonic), davon der Anteil share;
+    mindestens 1 s, damit Gurobi immer eine Startloesung finden kann."""
+    return max(1.0, (end - time.monotonic()) * share)
+
+
+def _gurobi_model(players, pool, k, together, apart, all_play, time_limit, foreign=True):
     """Grundmodell: x[p, r, t] = 1, wenn Spieler p in Team t Rolle r spielt.
-    Jede Rolle ist moeglich (nicht angegebene werden nur gezaehlt), Spieler-
-    Praeferenzen sind harte Constraints. all_play=False: Ersatz erlaubt (Phase 1).
+    foreign=True: jede Rolle ist moeglich (nicht angegebene werden nur gezaehlt);
+    foreign=False: nur Main- und Zweitrollen - deutlich kleineres Modell (wichtig
+    fuer die groessenbeschraenkte Gurobi-Lizenz). Spieler-Praeferenzen sind harte
+    Constraints. all_play=False: Ersatz erlaubt (Phase 1).
+    Liefert None, wenn ohne fremde Rollen eine Rolle von niemandem besetzbar ist.
     """
+    roles_of = {p: [r for r in ROLES if foreign or role_cost(players[p], r) < W_FOREIGN]
+                for p in pool}
+    if any(sum(r in roles_of[p] for p in pool) < k for r in ROLES):
+        return None
     m = gp.Model("teams")
     m.Params.OutputFlag = 0
     m.Params.TimeLimit = time_limit
     x = {(p, r, t): m.addVar(vtype=GRB.BINARY)
-         for p in pool for r in ROLES for t in range(k)}
-    z = {(p, t): gp.quicksum(x[p, r, t] for r in ROLES) for p in pool for t in range(k)}
+         for p in pool for r in roles_of[p] for t in range(k)}
+    z = {(p, t): gp.quicksum(x[p, r, t] for r in roles_of[p]) for p in pool for t in range(k)}
     plays = {p: gp.quicksum(z[p, t] for t in range(k)) for p in pool}
     for p in pool:
         m.addConstr(plays[p] == 1 if all_play else plays[p] <= 1)
     for r in ROLES:
         for t in range(k):
-            m.addConstr(gp.quicksum(x[p, r, t] for p in pool) == 1)
+            m.addConstr(gp.quicksum(x[p, r, t] for p in pool if r in roles_of[p]) == 1)
 
     in_pool = set(pool)
     for i, j in together:  # beide spielen, und zwar im selben Team
@@ -771,17 +787,28 @@ def gurobi_select(players, k, together, apart, time_limit=60):
     (3) bei Gleichstand sitzen die Schwaechsten aus.
     Liefert (aktive Spieler, min. fremde Rollen, min. Zweitrollen, Status)."""
     n = len(players)
-    m, x, n_foreign, n_second = _gurobi_model(players, range(n), k, together, apart,
-                                              all_play=False, time_limit=time_limit)
     rank = {i: r + 1 for r, i in enumerate(sorted(range(n),
                                                   key=lambda i: players[i]["strength"]))}
-    plays_weighted = gp.quicksum(rank[p] * v for (p, _, _), v in x.items())
-    m.ModelSense = GRB.MINIMIZE
-    m.setObjectiveN(n_foreign, index=0, priority=3)
-    m.setObjectiveN(n_second, index=1, priority=2)
-    m.setObjectiveN(-plays_weighted, index=2, priority=1)
-    m.optimize()
-    status = GRB_STATUS.get(m.Status, str(m.Status))
+    # Zuerst nur mit angegebenen Rollen loesen (kleines Modell). Ist das loesbar,
+    # ist das Minimum an fremden Rollen 0 und die Loesung exakt dieselbe wie im
+    # vollen Modell; sonst mit allen Rollen nachrechnen (im selben Zeitlimit).
+    end = time.monotonic() + time_limit
+    for foreign in (False, True):
+        built = _gurobi_model(players, range(n), k, together, apart, all_play=False,
+                              time_limit=_time_left(end), foreign=foreign)
+        if built is None:
+            continue
+        m, x, n_foreign, n_second = built
+        plays_weighted = gp.quicksum(rank[p] * v for (p, _, _), v in x.items())
+        m.ModelSense = GRB.MINIMIZE
+        m.setObjectiveN(n_foreign, index=0, priority=3)
+        m.setObjectiveN(n_second, index=1, priority=2)
+        m.setObjectiveN(-plays_weighted, index=2, priority=1)
+        m.Params.TimeLimit = _time_left(end)  # erst jetzt: der Modellaufbau zaehlt mit
+        m.optimize()
+        status = GRB_STATUS.get(m.Status, str(m.Status))
+        if m.SolCount > 0:
+            break
     if m.SolCount == 0:
         return None, None, None, status
     teams = _gurobi_teams(x, k)
@@ -799,44 +826,73 @@ def solve_gurobi(players, active, k, mode, max_foreign, max_second, time_limit=6
     die Minima aus Phase 1, die Prioritaeten bleiben also exakt erhalten.
 
     mode "staerkste":    lexikographisch Team 1 maximal, dann Team 2, ...
-    mode "ausgeglichen": minimiere sum_t (S_t - S_mittel)^2  (MIQP)
+    mode "ausgeglichen": minimiere sum_t (S_t - S_mittel)^2  (MIQP). Laesst die
+                         Lizenz das nicht zu (groessenbeschraenkte Lizenz:
+                         quadratische Modelle nur bis 200 Variablen), wird linear
+                         geloest: lexikographisch (1) Spanne staerkstes -
+                         schwaechstes Team, (2) Summe |S_t - S_mittel|.
     start: optionale Startloesung (z. B. aus der Heuristik) - Gurobi wird dann
     hoechstens besser, nie schlechter als diese.
+    Liefert (teams, status, gap, ziel) mit ziel 'quadratisch' | 'linear' | None.
     """
-    m, x, n_foreign, n_second = _gurobi_model(players, active, k, together, apart,
-                                              all_play=True, time_limit=time_limit)
-    m.addConstr(n_foreign <= max_foreign)
-    m.addConstr(n_second <= max_second)
+    objectives = ["max"] if mode == "staerkste" else ["quadratisch", "linear"]
+    end = time.monotonic() + time_limit
+    for objective in objectives:
+        built = _gurobi_model(players, active, k, together, apart, all_play=True,
+                              time_limit=_time_left(end), foreign=max_foreign > 0)
+        if built is None:
+            return None, "unzulaessig", None, None
+        m, x, n_foreign, n_second = built
+        m.addConstr(n_foreign <= max_foreign)
+        m.addConstr(n_second <= max_second)
 
-    S = [gp.quicksum(players[p]["strength"] * v for (p, _, tt), v in x.items() if tt == t)
-         for t in range(k)]
-    # Teams sind austauschbar -> Symmetrie brechen (Team 1 ist das staerkste)
-    for t in range(k - 1):
-        m.addConstr(S[t] >= S[t + 1])
-
-    if mode == "staerkste":
-        m.ModelSense = GRB.MAXIMIZE
-        for t in range(k):
-            m.setObjectiveN(S[t], index=t, priority=k - t)
-    else:
+        S = [gp.quicksum(players[p]["strength"] * v for (p, _, tt), v in x.items() if tt == t)
+             for t in range(k)]
+        # Teams sind austauschbar -> Symmetrie brechen (Team 1 ist das staerkste)
+        for t in range(k - 1):
+            m.addConstr(S[t] >= S[t + 1])
         mean = sum(players[p]["strength"] for p in active) / k
-        m.setObjective(gp.quicksum((S[t] - mean) * (S[t] - mean) for t in range(k)),
-                       GRB.MINIMIZE)
-    if start and {i for tm in start for i in tm.values()} == set(active):
-        # Startteams nach Staerke sortieren, damit die Symmetrie-Constraints gelten
-        order = sorted(start, key=lambda tm: -sum(players[i]["strength"] for i in tm.values()))
-        for v in x.values():
-            v.Start = 0
-        for t, team in enumerate(order):
-            for r, p in team.items():
-                x[p, r, t].Start = 1
-    m.optimize()
+
+        if objective == "max":
+            m.ModelSense = GRB.MAXIMIZE
+            for t in range(k):
+                m.setObjectiveN(S[t], index=t, priority=k - t)
+        elif objective == "quadratisch":
+            m.setObjective(gp.quicksum((S[t] - mean) * (S[t] - mean) for t in range(k)),
+                           GRB.MINIMIZE)
+        else:
+            dev = m.addVars(k, lb=0.0)
+            for t in range(k):
+                m.addConstr(dev[t] >= S[t] - mean)
+                m.addConstr(dev[t] >= mean - S[t])
+            m.ModelSense = GRB.MINIMIZE
+            m.setObjectiveN(S[0] - S[k - 1], index=0, priority=2)  # S absteigend sortiert
+            m.setObjectiveN(dev.sum(), index=1, priority=1)
+
+        if start and {i for tm in start for i in tm.values()} == set(active):
+            # Startteams nach Staerke sortieren, damit die Symmetrie-Constraints gelten
+            order = sorted(start, key=lambda tm: -sum(players[i]["strength"]
+                                                      for i in tm.values()))
+            for v in x.values():
+                v.Start = 0
+            for t, team in enumerate(order):
+                for r, p in team.items():
+                    if (p, r, t) in x:
+                        x[p, r, t].Start = 1
+        m.Params.TimeLimit = _time_left(end)  # erst jetzt: der Modellaufbau zaehlt mit
+        try:
+            m.optimize()
+        except gp.GurobiError as e:
+            if e.errno == GRB_SIZE_LIMIT and objective == "quadratisch":
+                continue  # zu gross fuer die Lizenz -> lineare Variante
+            raise
+        break
+
     status = GRB_STATUS.get(m.Status, str(m.Status))
     if m.SolCount == 0:
-        return None, status, None
-
-    gap = m.MIPGap if mode == "ausgeglichen" else None
-    return _gurobi_teams(x, k), status, gap
+        return None, status, None, None
+    gap = m.MIPGap if objective == "quadratisch" else None
+    return _gurobi_teams(x, k), status, gap, (None if objective == "max" else objective)
 
 
 def team_std(teams, players):
@@ -916,6 +972,7 @@ def build_all(players, k, together=(), apart=(), time_limit=60, log=print, on_st
     wenige Zweitrollen, (4) Ziel des Modus.
     Liefert eine Liste von Dicts mit name, title, mode ('staerkste'|'ausgeglichen'),
     solver ('heuristik'|'gurobi'), status, gap, teams, reserves.
+    time_limit: Gesamtzeit in Sekunden fuer alle Gurobi-Schritte zusammen.
     log: Ausgabe-Funktion fuer Statusmeldungen; on_stage: optionaler Callback,
     der vor dem Gurobi-Teil mit 'gurobi' aufgerufen wird."""
     n = len(players)
@@ -946,30 +1003,57 @@ def build_all(players, k, together=(), apart=(), time_limit=60, log=print, on_st
 
     if on_stage:
         on_stage("gurobi")
-    log(f"\nLöse mit Gurobi (Zeitlimit je Schritt {time_limit}s) ...")
+    log(f"\nLöse mit Gurobi (Zeitlimit insgesamt {time_limit}s) ...")
+    try:
+        _build_gurobi(players, k, together, apart, time_limit, log, results,
+                      strongest, balanced)
+    except gp.GurobiError as e:
+        # z. B. groessenbeschraenkte Lizenz (max. 2000 Variablen/Constraints) oder
+        # abgelaufene Lizenz -> die Heuristik-Ergebnisse bleiben gueltig
+        if e.errno == GRB_SIZE_LIMIT:
+            note = ("Für diese Spielerzahl ist das Modell zu groß für die "
+                    "eingeschränkte Gurobi-Lizenz (max. 2000 Variablen).")
+        else:
+            note = f"Gurobi-Fehler: {e}"
+        log(f"[Gurobi] übersprungen - {note} Es gilt die heuristische Lösung.")
+        solved = {r["mode"] for r in results if r["solver"] == "gurobi"}
+        for r in results:
+            if r["solver"] == "heuristik" and r["mode"] not in solved:
+                r["gurobi_note"] = note
+    return results
+
+
+def _build_gurobi(players, k, together, apart, time_limit, log, results, strongest, balanced):
+    """Gurobi-Teil von build_all: haengt die Gurobi-Aufstellungen an results an.
+    time_limit ist das Gesamtbudget fuer alle drei Schritte: jeder Schritt bekommt
+    einen fairen Anteil der Restzeit (1/3, 1/2, Rest); was ein Schritt nicht
+    braucht, geht an die folgenden - meist an 'ausgeglichen', den schwersten."""
+    n = len(players)
+    end = time.monotonic() + time_limit
     active, g_foreign, g_second, status = gurobi_select(players, k, together, apart,
-                                                        time_limit)
+                                                        _time_left(end, 1 / 3))
     if active is None:
         log(f"[Gurobi] keine Aufstellung gefunden, die alle Präferenzen erfüllt "
             f"({status}).")
-        return results
+        return
     g_reserves = [i for i in range(n) if i not in set(active)]
     log(f"Gurobi Phase 1 [{status}]: {g_second} auf Zweitrolle, {g_foreign} auf "
         "nicht angegebener Rolle.")
-    for mode, name, title, warm in (
-            ("staerkste", "staerkste_teams_gurobi", "STÄRKSTE TEAMS - GUROBI", strongest),
+    for mode, name, title, warm, share in (
+            ("staerkste", "staerkste_teams_gurobi", "STÄRKSTE TEAMS - GUROBI", strongest, 1 / 2),
             ("ausgeglichen", "ausgeglichene_teams_gurobi", "AUSGEGLICHENE TEAMS - GUROBI",
-             balanced)):
-        teams, status, gap = solve_gurobi(players, active, k, mode, g_foreign, g_second,
-                                          time_limit, warm, together, apart)
+             balanced, 1)):
+        teams, status, gap, objective = solve_gurobi(players, active, k, mode, g_foreign,
+                                                     g_second, _time_left(end, share), warm,
+                                                     together, apart)
         if teams is None:
             log(f"\n[Gurobi {mode}] keine Lösung gefunden ({status}).")
             continue
         gap_s = f", Gap {gap * 100:.2f} %" if gap is not None else ""
-        results.append(dict(name=name, title=f"{title} [{status}{gap_s}]", mode=mode,
+        obj_s = ", lineares Ziel: Spanne" if objective == "linear" else ""
+        results.append(dict(name=name, title=f"{title} [{status}{gap_s}{obj_s}]", mode=mode,
                             solver="gurobi", status=status, gap=gap, teams=teams,
-                            reserves=g_reserves))
-    return results
+                            reserves=g_reserves, objective=objective))
 
 
 def run(csv_path, time_limit=60):
@@ -1038,6 +1122,6 @@ if __name__ == "__main__":
     except Exception:
         pass
     if len(sys.argv) not in (2, 3):
-        print("Aufruf: python team_builder.py <pfad/zur/spieler.csv> [gurobi-zeitlimit-s]")
+        print("Aufruf: python team_builder.py <pfad/zur/spieler.csv> [gurobi-gesamtzeit-s]")
         raise SystemExit(1)
     run(sys.argv[1], time_limit=int(sys.argv[2]) if len(sys.argv) == 3 else 60)
