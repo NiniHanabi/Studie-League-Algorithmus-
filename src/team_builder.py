@@ -46,6 +46,7 @@ Aufruf:  python team_builder.py <pfad/zur/spieler.csv> [gurobi-zeitlimit-s]
 Voraussetzung: gueltiger Riot API Key (RIOT_API_KEY, Riot-Crawler/.env oder riot.txt)
 und weights.json (wird bei Bedarf ueber regression.py erzeugt).
 """
+import io
 import math
 import os
 import random
@@ -120,11 +121,18 @@ def load_api_key():
 
 
 class RiotAPI:
-    """Minimaler Client fuer die zwei benoetigten Endpunkte."""
+    """Minimaler Client fuer die zwei benoetigten Endpunkte.
 
-    def __init__(self, api_key):
+    on_wait: optionaler Callback(sekunden), wenn das Rate-Limit greift.
+    auth_failed wird True, sobald die API den Key ablehnt (401/403) - sonst
+    wuerden alle Spieler stillschweigend als 'ohne Rang' gewertet.
+    """
+
+    def __init__(self, api_key, on_wait=None):
         self.s = requests.Session()
         self.s.headers.update({"X-Riot-Token": api_key})
+        self.on_wait = on_wait
+        self.auth_failed = False
 
     def _get(self, url):
         for _ in range(6):
@@ -132,9 +140,14 @@ class RiotAPI:
             if r.status_code == 429:
                 wait = int(r.headers.get("Retry-After", 5))
                 print(f"  [429] Rate-Limit, warte {wait}s ...")
+                if self.on_wait:
+                    self.on_wait(wait)
                 time.sleep(wait)
                 continue
-            if r.status_code in (400, 403, 404):
+            if r.status_code in (401, 403):
+                self.auth_failed = True
+                return None
+            if r.status_code in (400, 404):
                 return None
             r.raise_for_status()
             time.sleep(0.05)  # sanftes Drosseln
@@ -183,32 +196,48 @@ def _find_col(cols, *candidates):
     return None
 
 
-def read_players_csv(path):
-    # Trenner automatisch erkennen (Semikolon oder Komma); Kodierung robust
-    # nacheinander probieren (Windows-Excel speichert oft cp1252 statt UTF-8).
-    df = None
+def read_table(source):
+    """CSV als DataFrame (nur Strings) laden. source: Pfad oder Bytes.
+    Trenner automatisch erkennen (Semikolon oder Komma); Kodierung robust
+    nacheinander probieren (Windows-Excel speichert oft cp1252 statt UTF-8)."""
     for enc in ("utf-8-sig", "cp1252", "latin-1"):
         try:
-            df = pd.read_csv(path, sep=None, engine="python", dtype=str,
-                             encoding=enc).fillna("")
-            break
+            src = io.BytesIO(source) if isinstance(source, (bytes, bytearray)) else source
+            return pd.read_csv(src, sep=None, engine="python", dtype=str,
+                               encoding=enc).fillna("")
         except (UnicodeDecodeError, UnicodeError):
             continue
-    if df is None:
-        raise ValueError(f"CSV {path} konnte mit keiner gängigen Kodierung "
-                         "(UTF-8, cp1252, Latin-1) gelesen werden.")
-    c_id = _find_col(df.columns, "riot id", "riotid", "riot-id")
-    c_main = _find_col(df.columns, "main position", "main", "mainposition")
-    c_sec = _find_col(df.columns, "second positions", "second position",
-                      "secondary positions", "seconds")
-    c_with = _find_col(df.columns, "mit", "zusammen mit", "duo", "with", "play with")
-    c_not = _find_col(df.columns, "nicht mit", "nicht zusammen mit", "ohne", "not with",
-                      "notwith", "without", "not play with")
-    if not c_id or not c_main:
+    raise ValueError("CSV konnte mit keiner gängigen Kodierung "
+                     "(UTF-8, cp1252, Latin-1) gelesen werden.")
+
+
+def player_columns(df):
+    """Spaltennamen fuer RIOT ID, Main, Zweitrollen, Mit, Nicht mit finden."""
+    cols = {
+        "id": _find_col(df.columns, "riot id", "riotid", "riot-id"),
+        "main": _find_col(df.columns, "main position", "main", "mainposition"),
+        "sec": _find_col(df.columns, "second positions", "second position",
+                         "secondary positions", "seconds"),
+        "with": _find_col(df.columns, "mit", "zusammen mit", "duo", "with", "play with"),
+        "not_with": _find_col(df.columns, "nicht mit", "nicht zusammen mit", "ohne",
+                              "not with", "notwith", "without", "not play with"),
+    }
+    if not cols["id"] or not cols["main"]:
         raise ValueError("CSV benoetigt mindestens die Spalten 'RIOT ID' und "
                          "'Main Position'.")
+    return cols
 
-    players, problems = [], []
+
+def read_players_csv(path):
+    return players_from_table(read_table(path))
+
+
+def players_from_table(df):
+    cols = player_columns(df)
+    c_id, c_main, c_sec, c_with, c_not = (cols[k] for k in
+                                          ("id", "main", "sec", "with", "not_with"))
+
+    players, problems, seen = [], [], set()
     for _, row in df.iterrows():
         riot_id = row[c_id].strip()
         if not riot_id:
@@ -216,6 +245,10 @@ def read_players_csv(path):
         if "#" not in riot_id:
             problems.append(f"'{riot_id}' hat kein '#Tagline'.")
             continue
+        if _id_key(riot_id) in seen:
+            problems.append(f"'{riot_id}' steht mehrfach in der Liste.")
+            continue
+        seen.add(_id_key(riot_id))
         name, tag = riot_id.rsplit("#", 1)
         main = normalize_role(row[c_main])
         if not main:
@@ -281,7 +314,8 @@ def pref_violations(teams, together, apart):
 # ---------------------------------------------------------------------------
 # Staerke je Spieler ueber die API + Modellgewichte
 # ---------------------------------------------------------------------------
-def enrich_strength(players, api, model):
+def enrich_strength(players, api, model, on_progress=None):
+    """on_progress: optionaler Callback(fertig, gesamt, spieler, ranked)."""
     rows = []
     for p in players:
         puuid = api.puuid(p["name"], p["tag"])
@@ -305,6 +339,8 @@ def enrich_strength(players, api, model):
                          "win_rate": np.nan, "tier": "UNRANKED", "division": "",
                          "ranked": False})
             print(f"  {p['riot_id']:<28} kein Solo/Duo-Rang gefunden")
+        if on_progress:
+            on_progress(len(rows), len(players), p, rows[-1]["ranked"])
 
     df = pd.DataFrame(rows)
     # Modell-Staerke; fehlende Werte werden vom Modell mit dem Trainings-Median gefuellt
@@ -874,10 +910,14 @@ def teams_to_dataframe(teams, players, mode, reserves=()):
 # ---------------------------------------------------------------------------
 # Ablauf
 # ---------------------------------------------------------------------------
-def build_all(players, k, together=(), apart=(), time_limit=60):
+def build_all(players, k, together=(), apart=(), time_limit=60, log=print, on_stage=None):
     """Bildet alle Aufstellungen. Prioritaeten: (1) alle Spieler-Praeferenzen
     erfuellt (hart), (2) moeglichst wenige nicht angegebene Rollen, (3) moeglichst
-    wenige Zweitrollen, (4) Ziel des Modus. Liefert [(name, titel, teams, ersatz)]."""
+    wenige Zweitrollen, (4) Ziel des Modus.
+    Liefert eine Liste von Dicts mit name, title, mode ('staerkste'|'ausgeglichen'),
+    solver ('heuristik'|'gurobi'), status, gap, teams, reserves.
+    log: Ausgabe-Funktion fuer Statusmeldungen; on_stage: optionaler Callback,
+    der vor dem Gurobi-Teil mit 'gurobi' aufgerufen wird."""
     n = len(players)
     role_of, _, infeasible = assign_roles(players, k)
     start = None
@@ -889,29 +929,33 @@ def build_all(players, k, together=(), apart=(), time_limit=60):
                   and role_cost(players[i], role_of[i]) == W_FOREIGN)
     second = sum(1 for i in range(n) if role_of[i] is not None
                  and role_cost(players[i], role_of[i]) == 1)
-    print(f"\nRollenverteilung (Heuristik): {n - len(reserves) - foreign - second} auf "
-          f"Main-Rolle, {second} auf Zweitrolle, {foreign} auf nicht angegebener Rolle.")
+    log(f"\nRollenverteilung (Heuristik): {n - len(reserves) - foreign - second} auf "
+        f"Main-Rolle, {second} auf Zweitrolle, {foreign} auf nicht angegebener Rolle.")
 
     strongest = build_strongest(players, role_of, k, together, apart, start=start)
     balanced = build_balanced(players, role_of, k, together=together, apart=apart,
                               start=start)
-    results = [("staerkste_teams", "STÄRKSTE TEAMS (Stärke gebündelt)", strongest, reserves),
-               ("ausgeglichene_teams", "AUSGEGLICHENE TEAMS (Stärke angeglichen)",
-                balanced, reserves)]
+    heur = dict(solver="heuristik", status=None, gap=None, reserves=reserves)
+    results = [dict(heur, name="staerkste_teams", mode="staerkste", teams=strongest,
+                    title="STÄRKSTE TEAMS (Stärke gebündelt)"),
+               dict(heur, name="ausgeglichene_teams", mode="ausgeglichen", teams=balanced,
+                    title="AUSGEGLICHENE TEAMS (Stärke angeglichen)")]
     if not HAS_GUROBI:
-        print("\n[Hinweis] gurobipy nicht verfügbar - nur heuristische Lösung.")
+        log("\n[Hinweis] gurobipy nicht verfügbar - nur heuristische Lösung.")
         return results
 
-    print(f"\nLöse mit Gurobi (Zeitlimit je Schritt {time_limit}s) ...")
+    if on_stage:
+        on_stage("gurobi")
+    log(f"\nLöse mit Gurobi (Zeitlimit je Schritt {time_limit}s) ...")
     active, g_foreign, g_second, status = gurobi_select(players, k, together, apart,
                                                         time_limit)
     if active is None:
-        print(f"[Gurobi] keine Aufstellung gefunden, die alle Präferenzen erfüllt "
-              f"({status}).")
+        log(f"[Gurobi] keine Aufstellung gefunden, die alle Präferenzen erfüllt "
+            f"({status}).")
         return results
     g_reserves = [i for i in range(n) if i not in set(active)]
-    print(f"Gurobi Phase 1 [{status}]: {g_second} auf Zweitrolle, {g_foreign} auf "
-          "nicht angegebener Rolle.")
+    log(f"Gurobi Phase 1 [{status}]: {g_second} auf Zweitrolle, {g_foreign} auf "
+        "nicht angegebener Rolle.")
     for mode, name, title, warm in (
             ("staerkste", "staerkste_teams_gurobi", "STÄRKSTE TEAMS - GUROBI", strongest),
             ("ausgeglichen", "ausgeglichene_teams_gurobi", "AUSGEGLICHENE TEAMS - GUROBI",
@@ -919,10 +963,12 @@ def build_all(players, k, together=(), apart=(), time_limit=60):
         teams, status, gap = solve_gurobi(players, active, k, mode, g_foreign, g_second,
                                           time_limit, warm, together, apart)
         if teams is None:
-            print(f"\n[Gurobi {mode}] keine Lösung gefunden ({status}).")
+            log(f"\n[Gurobi {mode}] keine Lösung gefunden ({status}).")
             continue
         gap_s = f", Gap {gap * 100:.2f} %" if gap is not None else ""
-        results.append((name, f"{title} [{status}{gap_s}]", teams, g_reserves))
+        results.append(dict(name=name, title=f"{title} [{status}{gap_s}]", mode=mode,
+                            solver="gurobi", status=status, gap=gap, teams=teams,
+                            reserves=g_reserves))
     return results
 
 
@@ -948,6 +994,9 @@ def run(csv_path, time_limit=60):
     model = load_weights()
     api = RiotAPI(load_api_key())
     players = enrich_strength(players, api, model)
+    if api.auth_failed:
+        print("\n[Warnung] Die Riot API hat den API Key abgelehnt (ungültig oder "
+              "abgelaufen) - Ränge fehlen, Stärken sind nur geschätzt.")
 
     unranked = [p["riot_id"] for p in players if not p["ranked"]]
     if unranked:
@@ -956,26 +1005,27 @@ def run(csv_path, time_limit=60):
 
     results = build_all(players, k, together, apart, time_limit)
 
-    for _, title, teams, reserves in results:
-        print_teams(title, teams, players)
-        if reserves:
-            print("\n  Ersatz: " + ", ".join(players[i]["riot_id"] for i in reserves))
-        print_preferences(teams, players, together, apart)
+    for res in results:
+        print_teams(res["title"], res["teams"], players)
+        if res["reserves"]:
+            print("\n  Ersatz: " + ", ".join(players[i]["riot_id"] for i in res["reserves"]))
+        print_preferences(res["teams"], players, together, apart)
 
     print("\n" + "=" * 60)
     print("VERGLEICH (Streuung der Team-Summen, kleiner = ausgeglichener)")
     print("=" * 60)
-    for name, _, teams, _ in results:
-        foreign, second = role_counts(teams, players)
-        n_bad = len(pref_violations(teams, together, apart))
+    for res in results:
+        foreign, second = role_counts(res["teams"], players)
+        n_bad = len(pref_violations(res["teams"], together, apart))
         pref_s = f"   Präferenzen verletzt: {n_bad}" if together or apart else ""
-        print(f"  {name:<28} std {team_std(teams, players):.3f}   Zweitrolle {second}"
-              f"   nicht angegeben {foreign}{pref_s}")
+        print(f"  {res['name']:<28} std {team_std(res['teams'], players):.3f}   "
+              f"Zweitrolle {second}   nicht angegeben {foreign}{pref_s}")
 
     saved = []
-    for name, _, teams, reserves in results:
+    for res in results:
+        name = res["name"]
         out = csv_path.with_name(f"{csv_path.stem}_{name}.csv")
-        teams_to_dataframe(teams, players, name, reserves).to_csv(
+        teams_to_dataframe(res["teams"], players, name, res["reserves"]).to_csv(
             out, index=False, sep=";", encoding="utf-8-sig")
         saved.append(out.name)
     print(f"\nGespeichert: {', '.join(saved)}")
